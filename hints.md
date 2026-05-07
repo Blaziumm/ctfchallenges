@@ -1,18 +1,5 @@
 # CTF Web Challenge Hints
 
-Use these hints in order. Try the next hint only if you are stuck.
-
-
-## 2) SQL Injection Login
-
-Hint 1:
-The login check is vulnerable to input that changes query logic.
-
-Hint 2:
-Try using a quote (`'`) in the password field and observe behavior.
-
-Hint 3:
-Use a classic authentication bypass payload that makes a condition always true.
 
 ## 3) XSS Discovery
 
@@ -26,15 +13,6 @@ Hint 3:
 If you can execute JavaScript from the comment, inspect global objects on `window` and look for challenge data.
 
 ## 4) IDOR Notes API
-
-Hint 1:
-You can request notes by numeric ID.
-
-Hint 2:
-Watch the browser network request and identify the API route pattern.
-
-Hint 3:
-Change only the object ID and test whether authorization is enforced for other users' notes.
 
 ## General CTF Workflow Tip
 
