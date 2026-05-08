@@ -30,4 +30,12 @@ Title:
 IDOR Notes API
 
 Description:
-A notes API exposes records by numeric object IDs but does not properly enforce ownership checks. Enumerate IDs to access data outside your account and find the flag.
+An intermediate notes API exposes records by numeric object IDs but does not properly enforce ownership checks. Enumerate IDs to access data outside your account and find the flag.
+
+## 5) Compartmentalized Vault
+
+Title:
+Compartmentalized Vault
+
+Description:
+The hardest compartmented records portal checks the requested compartment before normalizing its path. Bypass the compartment fence to reach the hidden vault record and recover the flag.
