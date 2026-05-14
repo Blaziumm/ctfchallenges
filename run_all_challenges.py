@@ -53,9 +53,13 @@ class StaticDirectoryHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=directory, **kwargs)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 def start_static_server(challenge_dir: Path, port: int):
     handler = lambda *args, **kwargs: StaticDirectoryHandler(*args, directory=str(challenge_dir), **kwargs)
-    server = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    server = ReusableThreadingHTTPServer(("0.0.0.0", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
@@ -176,7 +180,7 @@ def start_api_server(challenge_dir: Path, port: int, kind: str):
 
             return super().do_GET()
 
-    server = ThreadingHTTPServer(("0.0.0.0", port), ChallengeHandler)
+    server = ReusableThreadingHTTPServer(("0.0.0.0", port), ChallengeHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
