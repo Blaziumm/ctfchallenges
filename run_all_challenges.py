@@ -151,10 +151,6 @@ def start_challenge(challenge_num, config):
             print(f"  ✗ server.py not found in {challenge_dir}")
             return False
 
-        # Read the server.py and modify port
-        with open(server_file, "r") as f:
-            content = f.read()
-
         # Extract the filename for the subprocess label
         cmd = [PYTHON_EXECUTABLE, "server.py"]
         label = f"Challenge {challenge_num} (Flask, port {port})"
@@ -162,20 +158,8 @@ def start_challenge(challenge_num, config):
     try:
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             text=True,
-        )
-        # Set environment variable for Flask port
-        env = os.environ.copy()
-        env["FLASK_PORT"] = str(port)
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
+            env={**os.environ, "FLASK_PORT": str(port)},
             cwd=challenge_dir,
         )
 
@@ -233,8 +217,6 @@ def start_challenges_with_port_overrides():
         try:
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 text=True,
             )
             PROCESSES.append((challenge_num, process, label, port))

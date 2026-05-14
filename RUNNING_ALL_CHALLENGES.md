@@ -56,3 +56,9 @@ killall -9 python3
 - All services are accessible from `localhost` in development
 - The wrapper scripts (`_run_server_temp.py`) are created dynamically in each challenge directory
 - To run individual challenges, see the README in each challenge folder
+
+## Raspberry Pi Lite Boot Setup
+
+If you want the challenges to come up automatically on a Raspberry Pi Lite install with a static LAN address, use the helper script in [PI_SETUP.md](PI_SETUP.md).
+
+The script configures `192.168.1.5` by default and installs a `ctfchallenges.service` systemd unit that starts the challenge launcher on boot.
