@@ -56,6 +56,7 @@ BASE_DIR = Path(__file__).parent
 PROCESSES = []
 VENV_DIR = BASE_DIR / "venv"
 PYTHON_EXECUTABLE = sys.executable
+LOCAL_WHEEL_DIR = BASE_DIR / "wheels"
 
 
 def run_command(cmd, description=""):
@@ -107,7 +108,20 @@ def install_dependencies():
     """Install required Python packages."""
     print("\n🔧 Installing dependencies...")
     packages = ["Flask>=2.0"]
-    cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", *packages]
+    # If a local wheels directory exists (for offline installs), prefer it.
+    if LOCAL_WHEEL_DIR.exists():
+        cmd = [
+            PYTHON_EXECUTABLE,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            str(LOCAL_WHEEL_DIR),
+            *packages,
+        ]
+    else:
+        cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", *packages]
     return run_command(cmd, "Installing Flask")
 
 
@@ -124,7 +138,20 @@ def setup_challenge(challenge_num, config):
 
     # Install requirements if they exist
     if requirements_file.exists():
-        cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", "-r", str(requirements_file)]
+        if LOCAL_WHEEL_DIR.exists():
+            cmd = [
+                PYTHON_EXECUTABLE,
+                "-m",
+                "pip",
+                "install",
+                "--no-index",
+                "--find-links",
+                str(LOCAL_WHEEL_DIR),
+                "-r",
+                str(requirements_file),
+            ]
+        else:
+            cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", "-r", str(requirements_file)]
         if not run_command(cmd, f"Installing requirements from {requirements_file.name}"):
             return False
 
