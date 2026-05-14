@@ -1,4 +1,81 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+# pi_setup.sh
+# Usage: sudo ./pi_setup.sh [interface]
+# Default interface: eth0
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "This script must be run with sudo. Example: sudo ./pi_setup.sh"
+  exit 1
+fi
+
+INTERFACE="${1:-eth0}"
+STATIC_IP="192.168.1.5/24"
+ROUTERS="192.168.1.1"
+DNS="192.168.1.1 8.8.8.8"
+
+DHCPCD_CONF="/etc/dhcpcd.conf"
+BACKUP="${DHCPCD_CONF}.ctf_bak_$(date +%s)"
+
+echo "Backing up ${DHCPCD_CONF} -> ${BACKUP}"
+cp -a "${DHCPCD_CONF}" "${BACKUP}"
+
+echo "Removing any existing CTFCHALLENGES block in ${DHCPCD_CONF}"
+sed -i '/# CTFCHALLENGES-BEGIN/,/# CTFCHALLENGES-END/d' "${DHCPCD_CONF}" || true
+
+cat >> "${DHCPCD_CONF}" <<EOF
+# CTFCHALLENGES-BEGIN
+interface ${INTERFACE}
+static ip_address=${STATIC_IP}
+static routers=${ROUTERS}
+static domain_name_servers=${DNS}
+# CTFCHALLENGES-END
+EOF
+
+echo "Wrote static IP configuration for ${INTERFACE}: ${STATIC_IP}"
+
+# Create a systemd service that runs the challenges on boot.
+SERVICE_PATH="/etc/systemd/system/ctfchallenges.service"
+TARGET_USER="${SUDO_USER:-pi}"
+
+echo "Installing systemd service at ${SERVICE_PATH} (runs as ${TARGET_USER})"
+cat > "${SERVICE_PATH}" <<SERVICE_EOF
+[Unit]
+Description=CTF Challenges Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${TARGET_USER}
+WorkingDirectory=${REPO_DIR}
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/env python3 ${REPO_DIR}/run_all_challenges.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+echo "Reloading systemd and enabling service"
+systemctl daemon-reload
+systemctl enable ctfchallenges.service
+
+echo "Starting service now (may fail if network change drops connectivity)"
+systemctl start ctfchallenges.service || echo "Service start returned non-zero; check 'journalctl -u ctfchallenges'"
+
+echo "IMPORTANT: Changing the Pi's IP may disconnect your SSH session if run remotely over SSH."
+echo "If you are connected over SSH, consider running this from local console or expect to reconnect to 192.168.1.5."
+
+echo "Setup complete. Static IP: ${STATIC_IP} on ${INTERFACE}."
+echo "Service: systemctl status ctfchallenges"
+
+exit 0
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -90,6 +167,7 @@ fi
 
 configure_networkmanager() {
   local connection
+  local dns_text="${DNS_SERVERS//,/ }"
 
   connection="$(nmcli -t -f NAME,DEVICE connection show --active | awk -F: -v iface="$INTERFACE" '$2==iface {print $1; exit}')"
   if [[ -z "$connection" ]]; then
@@ -104,7 +182,7 @@ configure_networkmanager() {
   nmcli connection modify "$connection" \
     ipv4.addresses "${STATIC_IP}/${PREFIX}" \
     ipv4.gateway "$GATEWAY" \
-    ipv4.dns "$DNS_SERVERS" \
+    ipv4.dns "$dns_text" \
     ipv4.method manual \
     ipv6.method ignore
 
