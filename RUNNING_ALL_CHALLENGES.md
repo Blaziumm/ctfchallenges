@@ -1,7 +1,7 @@
 # CTF Challenges - Running All Services
 
 ## Overview
-The `run_all_challenges.py` script automatically sets up and runs all five web exploitation challenges on predetermined ports.
+The `run_all_challenges.py` script automatically runs all five web exploitation challenges on predetermined ports.
 
 ## Quick Start
 
@@ -10,10 +10,9 @@ python3 run_all_challenges.py
 ```
 
 The script will:
-1. ✓ Install all required dependencies (Flask)
-2. ✓ Set up each challenge
-3. ✓ Start all challenges on different ports
-4. ✓ Display access URLs
+1. ✓ Verify each challenge directory exists
+2. ✓ Start all challenges on different ports
+3. ✓ Display access URLs
 
 ## Challenge Ports
 
@@ -28,14 +27,9 @@ The script will:
 ## How It Works
 
 The master script:
-- Installs Flask and other dependencies
-- For static challenges (1 & 2): Uses Python's built-in `http.server`
-- For Flask challenges (3, 4 & 5): 
-  - Creates temporary wrapper scripts with port numbers injected
-  - Uses regex to replace original port numbers with predetermined ports
-- Runs all services as background processes
-- Monitors for process failures
-- Gracefully stops all services on Ctrl+C
+- Uses Python's built-in `http.server` for the static challenges
+- Runs the API challenges with stdlib HTTP handlers
+- Keeps all services in-process and shuts them down cleanly on Ctrl+C
 
 ## Stopping Services
 

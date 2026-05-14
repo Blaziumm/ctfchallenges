@@ -1,14 +1,17 @@
 Offline setup instructions
 
+The current repo is self-contained and does not need `venv`, Flask, or downloaded wheels to run.
+
+If you already copied an older archive that contains `wheels/`, it is safe to leave it in place, but it is no longer required.
+
 1) On an internet-connected Linux machine (clone the repo or copy it):
 
 ```bash
 cd /path/to/ctfchallenges
-./scripts/prepare_wheels.sh $(pwd)
-# This creates a 'wheels/' directory packed with required .whl files
+# No preparation step is required for runtime.
 ```
 
-2) Copy the entire `wheels/` directory to the Pi (USB stick, scp, etc.) and place it at the repository root so the path is `./wheels`.
+2) Copy the repository folder to the Pi (USB stick, scp, etc.).
 
 3) On the Pi (no internet needed):
 
@@ -18,10 +21,11 @@ sudo apt install python3 python3-venv   # if apt packages are already available 
 
 # From the repo root on the Pi
 python3 run_all_challenges.py
+```bash
+cd /path/to/ctfchallenges
+python3 run_all_challenges.py
 ```
 
-The launcher will detect `./wheels` and pip-install using `--no-index --find-links ./wheels`.
-
 Notes:
-- If you need system packages (.deb), use `apt-get download` on an internet host and transfer .deb files to the Pi. Installing .deb may require handling dependencies; consider using `apt-offline` for complex setups.
-- For reproducibility, run `./scripts/prepare_wheels.sh` on the same Python version as the target Pi.
+- The launcher now uses only the Python standard library.
+- If you want, you can delete the `wheels/` directory from older archives after updating to this version.

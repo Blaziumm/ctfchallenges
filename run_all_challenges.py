@@ -1,269 +1,216 @@
 #!/usr/bin/env python3
 """
-Master setup and launch script for all CTF web challenges.
+Master launcher for all CTF web challenges.
 
-Sets up dependencies and runs each challenge on a predetermined port:
-- Challenge 1 (Hidden Admin Panel):       http://localhost:8100
-- Challenge 2 (SQL Injection Login):      http://localhost:8101
-- Challenge 3 (XSS Discovery):            http://localhost:8102
-- Challenge 4 (IDOR Notes API):           http://localhost:8103
-- Challenge 5 (Compartmentalized Vault):  http://localhost:8104
+This version is fully offline and stdlib-only:
+- No virtualenv is required.
+- No third-party Python packages are required.
+- Challenges 1, 2, and 3 are served as static files.
+- Challenges 4 and 5 run as small stdlib HTTP API servers.
 """
 
+from __future__ import annotations
+
+import json
 import os
-import sys
-import re
 import subprocess
+import sys
+import threading
 import time
+import urllib.parse
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-# Configuration
-CHALLENGES = {
-    1: {
-        "name": "Hidden Admin Panel",
-        "dir": "web-exploitation-challenges-1-hidden-admin-panel",
-        "port": 8100,
-        "type": "static",
-    },
-    2: {
-        "name": "SQL Injection Login",
-        "dir": "web-exploitation-challenges-2-sql-injection-login",
-        "port": 8101,
-        "type": "static",
-    },
-    3: {
-        "name": "XSS Discovery",
-        "dir": "web-exploitation-challenges-3-xss-discovery",
-        "port": 8102,
-        "type": "flask",
-    },
-    4: {
-        "name": "IDOR Notes API",
-        "dir": "web-exploitation-challenges-4-idor-notes-api",
-        "port": 8103,
-        "type": "flask",
-    },
-    5: {
-        "name": "Compartmentalized Vault",
-        "dir": "web-exploitation-challenges-5-compartmentalized-vault",
-        "port": 8104,
-        "type": "flask",
-    },
-}
-
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.resolve()
 PROCESSES = []
-VENV_DIR = BASE_DIR / "venv"
-PYTHON_EXECUTABLE = sys.executable
-LOCAL_WHEEL_DIR = BASE_DIR / "wheels"
+
+CHALLENGES = {
+    1: {"name": "Hidden Admin Panel", "dir": "web-exploitation-challenges-1-hidden-admin-panel", "port": 8100, "kind": "static"},
+    2: {"name": "SQL Injection Login", "dir": "web-exploitation-challenges-2-sql-injection-login", "port": 8101, "kind": "static"},
+    3: {"name": "XSS Discovery", "dir": "web-exploitation-challenges-3-xss-discovery", "port": 8102, "kind": "static"},
+    4: {"name": "IDOR Notes API", "dir": "web-exploitation-challenges-4-idor-notes-api", "port": 8103, "kind": "notes-api"},
+    5: {"name": "Compartmentalized Vault", "dir": "web-exploitation-challenges-5-compartmentalized-vault", "port": 8104, "kind": "vault-api"},
+}
 
 
 def run_command(cmd, description=""):
-    """Run a command and return success status."""
     print(f"  ► {description}")
     try:
-        use_shell = isinstance(cmd, str)
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
             print(f"    ✗ Failed: {error_msg}")
             return False
         return True
-    except Exception as e:
-        print(f"    ✗ Error: {e}")
+    except Exception as exc:
+        print(f"    ✗ Error: {exc}")
         return False
 
 
-def get_venv_python_path():
-    """Return the Python executable path inside the local virtual environment."""
-    if os.name == "nt":
-        return VENV_DIR / "Scripts" / "python.exe"
-    return VENV_DIR / "bin" / "python3"
+class StaticDirectoryHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory=None, **kwargs):
+        super().__init__(*args, directory=directory, **kwargs)
 
 
-def ensure_virtualenv():
-    """Create and initialize a local virtual environment if needed."""
-    global PYTHON_EXECUTABLE
-
-    venv_python = get_venv_python_path()
-    if not venv_python.exists():
-        print("\n🔧 Creating isolated Python environment...")
-        if not run_command([sys.executable, "-m", "venv", str(VENV_DIR)], "Creating ./venv"):
-            return False
-
-    PYTHON_EXECUTABLE = str(venv_python)
-
-    # Ensure pip tooling in the venv is available and current.
-    if not run_command(
-        [PYTHON_EXECUTABLE, "-m", "pip", "install", "--upgrade", "pip"],
-        "Updating pip in virtual environment",
-    ):
-        return False
-
-    return True
+def start_static_server(challenge_dir: Path, port: int):
+    handler = lambda *args, **kwargs: StaticDirectoryHandler(*args, directory=str(challenge_dir), **kwargs)
+    server = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
 
 
-def install_dependencies():
-    """Install required Python packages."""
-    print("\n🔧 Installing dependencies...")
-    packages = ["Flask>=2.0"]
-    # If a local wheels directory exists (for offline installs), prefer it.
-    if LOCAL_WHEEL_DIR.exists():
-        cmd = [
-            PYTHON_EXECUTABLE,
-            "-m",
-            "pip",
-            "install",
-            "--no-index",
-            "--find-links",
-            str(LOCAL_WHEEL_DIR),
-            *packages,
-        ]
-    else:
-        cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", *packages]
-    return run_command(cmd, "Installing Flask")
+def json_response(handler, status_code: int, payload: dict):
+    data = json.dumps(payload).encode("utf-8")
+    handler.send_response(status_code)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
 
 
-def setup_challenge(challenge_num, config):
-    """Set up a single challenge."""
-    challenge_dir = BASE_DIR / config["dir"]
-    requirements_file = challenge_dir / "requirements.txt"
+def file_response(handler, file_path: Path, content_type: str):
+    data = file_path.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
 
-    print(f"\n📦 Setting up Challenge {challenge_num}: {config['name']}")
 
-    if not challenge_dir.exists():
-        print(f"  ✗ Directory not found: {challenge_dir}")
-        return False
+NOTES = {
+    101: {"owner": "alice", "title": "Shopping", "body": "Milk, eggs, bread"},
+    102: {"owner": "alice", "title": "Reminder", "body": "Pay internet bill"},
+    201: {"owner": "bob", "title": "Todo", "body": "Finish sprint report"},
+    202: {"owner": "bob", "title": "Draft", "body": "Team offsite ideas"},
+    9001: {"owner": "admin", "title": "Admin Secret", "body": "srcq{check_object_level_authorization}"},
+}
 
-    # Install requirements if they exist
-    if requirements_file.exists():
-        if LOCAL_WHEEL_DIR.exists():
-            cmd = [
-                PYTHON_EXECUTABLE,
-                "-m",
-                "pip",
-                "install",
-                "--no-index",
-                "--find-links",
-                str(LOCAL_WHEEL_DIR),
-                "-r",
-                str(requirements_file),
-            ]
-        else:
-            cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", "-r", str(requirements_file)]
-        if not run_command(cmd, f"Installing requirements from {requirements_file.name}"):
-            return False
 
-    print(f"  ✓ Challenge {challenge_num} ready")
-    return True
+COMPARTMENTS = {
+    "public/alpha": {"label": "Alpha", "purpose": "customer dispatch", "records": {11: {"title": "Route Sheet", "body": "Dock 3 loads at 08:00"}, 12: {"title": "Label Codes", "body": "Blue crates continue north"}}},
+    "public/beta": {"label": "Beta", "purpose": "inventory tracking", "records": {21: {"title": "Stock Count", "body": "Copper coils: 18"}, 22: {"title": "Short List", "body": "Replace broken seals"}}},
+    "ops/delta": {"label": "Delta", "purpose": "operations review", "records": {31: {"title": "Shift Note", "body": "Rotate the perimeter cameras"}, 32: {"title": "Vendor Call", "body": "Confirm pickup window"}}},
+    "vault": {"label": "Vault", "purpose": "restricted archive", "records": {9001: {"title": "Vault Record", "body": "srcq{normalize_before_authorizing}"}}},
+}
+VISIBLE_COMPARTMENTS = ["public/alpha", "public/beta", "ops/delta"]
+
+
+def normalize_compartment(compartment: str) -> str:
+    normalized = os.path.normpath(compartment).replace("\\", "/")
+    if normalized in (".", ""):
+        return ""
+    return normalized.lstrip("./")
+
+
+def start_api_server(challenge_dir: Path, port: int, kind: str):
+    class ChallengeHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(challenge_dir), **kwargs)
+
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+
+            if kind == "notes-api":
+                if path in ("/", "/index.html"):
+                    return file_response(self, challenge_dir / "index.html", "text/html; charset=utf-8")
+                if path == "/style.css":
+                    return file_response(self, challenge_dir / "style.css", "text/css; charset=utf-8")
+                if path == "/script.js":
+                    return file_response(self, challenge_dir / "script.js", "application/javascript; charset=utf-8")
+                if path.startswith("/api/notes/"):
+                    try:
+                        note_id = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return json_response(self, 400, {"error": "invalid note id"})
+
+                    note = NOTES.get(note_id)
+                    if not note:
+                        return json_response(self, 404, {"error": "note not found"})
+
+                    return json_response(self, 200, {"id": note_id, "owner": note["owner"], "title": note["title"], "body": note["body"]})
+
+            if kind == "vault-api":
+                if path in ("/", "/index.html"):
+                    return file_response(self, challenge_dir / "index.html", "text/html; charset=utf-8")
+                if path == "/style.css":
+                    return file_response(self, challenge_dir / "style.css", "text/css; charset=utf-8")
+                if path == "/script.js":
+                    return file_response(self, challenge_dir / "script.js", "application/javascript; charset=utf-8")
+                if path == "/api/compartments":
+                    compartments = []
+                    for compartment_name in VISIBLE_COMPARTMENTS:
+                        compartment = COMPARTMENTS[compartment_name]
+                        compartments.append({"path": compartment_name, "label": compartment["label"], "purpose": compartment["purpose"], "recordCount": len(compartment["records"])})
+
+                    return json_response(self, 200, {"user": "mira", "role": "courier", "compartments": compartments})
+
+                if path == "/api/records":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    compartment = query.get("compartment", [""])[0]
+                    record_id_text = query.get("id", [""])[0]
+
+                    if not compartment or not record_id_text:
+                        return json_response(self, 400, {"error": "missing compartment or id"})
+
+                    try:
+                        record_id = int(record_id_text)
+                    except ValueError:
+                        return json_response(self, 400, {"error": "invalid id"})
+
+                    if not compartment.startswith(("public/", "ops/")):
+                        return json_response(self, 403, {"error": "access denied"})
+
+                    normalized = normalize_compartment(compartment)
+                    compartment_data = COMPARTMENTS.get(normalized)
+                    if not compartment_data:
+                        return json_response(self, 404, {"error": "unknown compartment"})
+
+                    record = compartment_data["records"].get(record_id)
+                    if not record:
+                        return json_response(self, 404, {"error": "record not found"})
+
+                    return json_response(self, 200, {"compartment": normalized, "id": record_id, "title": record["title"], "body": record["body"]})
+
+            return super().do_GET()
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), ChallengeHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
 
 
 def start_challenge(challenge_num, config):
-    """Start a challenge on its designated port."""
     challenge_dir = BASE_DIR / config["dir"]
     port = config["port"]
-    challenge_type = config["type"]
+    kind = config["kind"]
 
-    os.chdir(challenge_dir)
+    if not challenge_dir.exists():
+        print(f"  ✗ Directory not found: {challenge_dir}")
+        return None
 
-    if challenge_type == "static":
-        # Use Python's built-in HTTP server
-        cmd = [PYTHON_EXECUTABLE, "-m", "http.server", str(port)]
+    if kind == "static":
+        server, _thread = start_static_server(challenge_dir, port)
         label = f"Challenge {challenge_num} (Static, port {port})"
-    else:  # flask
-        # Modify server.py to use the right port
-        server_file = challenge_dir / "server.py"
-        if not server_file.exists():
-            print(f"  ✗ server.py not found in {challenge_dir}")
-            return False
+    else:
+        server, _thread = start_api_server(challenge_dir, port, kind)
+        label = f"Challenge {challenge_num} ({kind.replace('-', ' ').title()}, port {port})"
 
-        # Extract the filename for the subprocess label
-        cmd = [PYTHON_EXECUTABLE, "server.py"]
-        label = f"Challenge {challenge_num} (Flask, port {port})"
-
-    try:
-        process = subprocess.Popen(
-            cmd,
-            text=True,
-            env={**os.environ, "FLASK_PORT": str(port)},
-            cwd=challenge_dir,
-        )
-
-        PROCESSES.append((challenge_num, process, label, port))
-        print(f"  ✓ {label} started (PID: {process.pid})")
-        return True
-
-    except Exception as e:
-        print(f"  ✗ Failed to start: {e}")
-        return False
-
-
-def start_challenges_with_port_overrides():
-    """Start all challenges with proper port configuration."""
-    print("\n🚀 Starting all challenges...\n")
-
-    for challenge_num, config in CHALLENGES.items():
-        challenge_dir = BASE_DIR / config["dir"]
-        port = config["port"]
-        challenge_type = config["type"]
-
-        print(f"  Starting Challenge {challenge_num}: {config['name']}")
-
-        if challenge_type == "static":
-            # Use Python's built-in HTTP server
-            cmd = [PYTHON_EXECUTABLE, "-m", "http.server", str(port), "--directory", str(challenge_dir)]
-            label = f"Challenge {challenge_num} (Static HTML, port {port})"
-
-        else:  # flask
-            # Create a wrapper script that runs the server with the right port
-            server_py = challenge_dir / "server.py"
-            if not server_py.exists():
-                print(f"    ✗ server.py not found in {challenge_dir}")
-                continue
-
-            # Create a temporary wrapper to inject the port
-            wrapper_script = challenge_dir / "_run_server_temp.py"
-            with open(server_py, "r") as f:
-                server_source = f.read()
-
-            # Inject port into the app.run() call - handle both single and double quotes, and various port numbers
-            # Match patterns like: port=8000, port=8001, port=8002 with or without quotes
-            modified_source = re.sub(
-                r'port=(\d+)',
-                f'port={port}',
-                server_source
-            )
-
-            with open(wrapper_script, "w") as f:
-                f.write(modified_source)
-
-            cmd = [PYTHON_EXECUTABLE, str(wrapper_script)]
-            label = f"Challenge {challenge_num} (Flask, port {port})"
-
-        try:
-            process = subprocess.Popen(
-                cmd,
-                text=True,
-            )
-            PROCESSES.append((challenge_num, process, label, port))
-            print(f"    ✓ {label} started (PID: {process.pid})")
-            time.sleep(0.5)  # Small delay between starts
-        except Exception as e:
-            print(f"    ✗ Failed to start {label}: {e}")
+    PROCESSES.append((challenge_num, server, label, port))
+    print(f"  ✓ {label} started")
+    return server
 
 
 def print_summary():
-    """Print summary of running challenges."""
     print("\n" + "=" * 70)
     print("✓ All challenges are running!")
     print("=" * 70)
     print("\n📋 Access your challenges at:\n")
 
     for challenge_num, config in CHALLENGES.items():
-        port = config["port"]
-        url = f"http://localhost:{port}"
-        print(f"  Challenge {challenge_num}: {config['name']:<35} {url}")
+        print(f"  Challenge {challenge_num}: {config['name']:<35} http://localhost:{config['port']}")
 
     print("\n" + "=" * 70)
     print("Press Ctrl+C to stop all challenges")
@@ -271,68 +218,51 @@ def print_summary():
 
 
 def cleanup():
-    """Terminate all running processes."""
     print("\n\n🛑 Shutting down all challenges...\n")
-    for challenge_num, process, label, port in PROCESSES:
+    for challenge_num, server, label, port in PROCESSES:
         try:
-            process.terminate()
-            process.wait(timeout=2)
+            server.shutdown()
+            server.server_close()
             print(f"  ✓ Stopped {label}")
-        except subprocess.TimeoutExpired:
-            process.kill()
-            print(f"  ✓ Forced stop {label}")
-        except Exception as e:
-            print(f"  ✗ Error stopping {label}: {e}")
+        except Exception as exc:
+            print(f"  ✗ Error stopping {label}: {exc}")
 
 
 def main():
-    """Main orchestration function."""
     print("\n" + "=" * 70)
     print("  CTF Web Challenges: Master Setup & Launch")
     print("=" * 70)
 
     try:
-        # Step 0: Ensure isolated environment so package installs never hit system Python.
-        if not ensure_virtualenv():
-            print("\n✗ Failed to initialize virtual environment")
-            return False
-
-        # Step 1: Install dependencies
-        if not install_dependencies():
-            print("\n✗ Failed to install dependencies")
-            return False
-
-        # Step 2: Set up all challenges
-        print("\n📦 Setting up all challenges...")
+        print("\n📦 Checking challenge directories...")
         for challenge_num, config in CHALLENGES.items():
-            if not setup_challenge(challenge_num, config):
-                print(f"✗ Setup failed for Challenge {challenge_num}")
+            challenge_dir = BASE_DIR / config["dir"]
+            if not challenge_dir.exists():
+                print(f"✗ Missing directory for Challenge {challenge_num}: {challenge_dir}")
                 return False
 
-        # Step 3: Start all challenges
-        start_challenges_with_port_overrides()
+        print("\n🚀 Starting all challenges...\n")
+        for challenge_num, config in CHALLENGES.items():
+            print(f"  Starting Challenge {challenge_num}: {config['name']}")
+            if start_challenge(challenge_num, config) is None:
+                print(f"    ✗ Failed to start Challenge {challenge_num}")
+                return False
+            time.sleep(0.2)
 
-        # Step 4: Print summary
         print_summary()
 
-        # Step 5: Keep running until interrupted
         while True:
             time.sleep(1)
-            # Check if any process has died
-            for i, (num, proc, label, port) in enumerate(PROCESSES):
-                if proc.poll() is not None:
-                    print(f"\n⚠️  {label} died (exit code: {proc.returncode})")
 
     except KeyboardInterrupt:
         cleanup()
         print("✓ All challenges stopped\n")
         return True
-    except Exception as e:
-        print(f"\n✗ Unexpected error: {e}")
+    except Exception as exc:
+        print(f"\n✗ Unexpected error: {exc}")
         cleanup()
         return False
 
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    sys.exit(0 if main() else 1)
