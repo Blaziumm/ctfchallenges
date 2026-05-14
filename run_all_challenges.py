@@ -54,15 +54,19 @@ CHALLENGES = {
 
 BASE_DIR = Path(__file__).parent
 PROCESSES = []
+VENV_DIR = BASE_DIR / "venv"
+PYTHON_EXECUTABLE = sys.executable
 
 
 def run_command(cmd, description=""):
     """Run a command and return success status."""
     print(f"  ► {description}")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+        use_shell = isinstance(cmd, str)
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
         if result.returncode != 0:
-            print(f"    ✗ Failed: {result.stderr}")
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            print(f"    ✗ Failed: {error_msg}")
             return False
         return True
     except Exception as e:
@@ -70,11 +74,40 @@ def run_command(cmd, description=""):
         return False
 
 
+def get_venv_python_path():
+    """Return the Python executable path inside the local virtual environment."""
+    if os.name == "nt":
+        return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "bin" / "python3"
+
+
+def ensure_virtualenv():
+    """Create and initialize a local virtual environment if needed."""
+    global PYTHON_EXECUTABLE
+
+    venv_python = get_venv_python_path()
+    if not venv_python.exists():
+        print("\n🔧 Creating isolated Python environment...")
+        if not run_command([sys.executable, "-m", "venv", str(VENV_DIR)], "Creating ./venv"):
+            return False
+
+    PYTHON_EXECUTABLE = str(venv_python)
+
+    # Ensure pip tooling in the venv is available and current.
+    if not run_command(
+        [PYTHON_EXECUTABLE, "-m", "pip", "install", "--upgrade", "pip"],
+        "Updating pip in virtual environment",
+    ):
+        return False
+
+    return True
+
+
 def install_dependencies():
     """Install required Python packages."""
     print("\n🔧 Installing dependencies...")
     packages = ["Flask>=2.0"]
-    cmd = f"{sys.executable} -m pip install {' '.join(packages)}"
+    cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", *packages]
     return run_command(cmd, "Installing Flask")
 
 
@@ -91,7 +124,7 @@ def setup_challenge(challenge_num, config):
 
     # Install requirements if they exist
     if requirements_file.exists():
-        cmd = f"{sys.executable} -m pip install -r {requirements_file}"
+        cmd = [PYTHON_EXECUTABLE, "-m", "pip", "install", "-r", str(requirements_file)]
         if not run_command(cmd, f"Installing requirements from {requirements_file.name}"):
             return False
 
@@ -109,7 +142,7 @@ def start_challenge(challenge_num, config):
 
     if challenge_type == "static":
         # Use Python's built-in HTTP server
-        cmd = [sys.executable, "-m", "http.server", str(port)]
+        cmd = [PYTHON_EXECUTABLE, "-m", "http.server", str(port)]
         label = f"Challenge {challenge_num} (Static, port {port})"
     else:  # flask
         # Modify server.py to use the right port
@@ -123,7 +156,7 @@ def start_challenge(challenge_num, config):
             content = f.read()
 
         # Extract the filename for the subprocess label
-        cmd = [sys.executable, "server.py"]
+        cmd = [PYTHON_EXECUTABLE, "server.py"]
         label = f"Challenge {challenge_num} (Flask, port {port})"
 
     try:
@@ -168,7 +201,7 @@ def start_challenges_with_port_overrides():
 
         if challenge_type == "static":
             # Use Python's built-in HTTP server
-            cmd = [sys.executable, "-m", "http.server", str(port), "--directory", str(challenge_dir)]
+            cmd = [PYTHON_EXECUTABLE, "-m", "http.server", str(port), "--directory", str(challenge_dir)]
             label = f"Challenge {challenge_num} (Static HTML, port {port})"
 
         else:  # flask
@@ -194,7 +227,7 @@ def start_challenges_with_port_overrides():
             with open(wrapper_script, "w") as f:
                 f.write(modified_source)
 
-            cmd = [sys.executable, str(wrapper_script)]
+            cmd = [PYTHON_EXECUTABLE, str(wrapper_script)]
             label = f"Challenge {challenge_num} (Flask, port {port})"
 
         try:
@@ -250,6 +283,11 @@ def main():
     print("=" * 70)
 
     try:
+        # Step 0: Ensure isolated environment so package installs never hit system Python.
+        if not ensure_virtualenv():
+            print("\n✗ Failed to initialize virtual environment")
+            return False
+
         # Step 1: Install dependencies
         if not install_dependencies():
             print("\n✗ Failed to install dependencies")
