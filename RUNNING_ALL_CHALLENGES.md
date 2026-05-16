@@ -51,6 +51,22 @@ killall -9 python3
 - The wrapper scripts (`_run_server_temp.py`) are created dynamically in each challenge directory
 - To run individual challenges, see the README in each challenge folder
 
+## Hosting Under A CTFd Domain Path
+
+If the CTFd site is already being served through a reverse proxy, mount each challenge under a path on that same domain and proxy it to the local ports above.
+
+Example Nginx locations:
+
+```nginx
+location /challenge-1/ { proxy_pass http://127.0.0.1:8100/; }
+location /challenge-2/ { proxy_pass http://127.0.0.1:8101/; }
+location /challenge-3/ { proxy_pass http://127.0.0.1:8102/; }
+location /challenge-4/ { proxy_pass http://127.0.0.1:8103/; }
+location /challenge-5/ { proxy_pass http://127.0.0.1:8104/; }
+```
+
+The trailing slash matters because it strips the path prefix before forwarding to the local challenge server. The IDOR and vault challenges already use relative asset/API URLs, so they work correctly when mounted this way.
+
 ## Raspberry Pi Lite Boot Setup
 
 If you want the challenges to come up automatically on a Raspberry Pi Lite install with a static LAN address, use the helper script in [PI_SETUP.md](PI_SETUP.md).
