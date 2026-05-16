@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory, abort
 
-BASE_DIR = Path(__file__).parent.parent.parent.resolve()
+BASE_DIR = Path(__file__).parent.resolve()
 
 bp = Blueprint("ctf_challenges", __name__)
 
