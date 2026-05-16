@@ -36,3 +36,15 @@ Reverse-proxy example (if you decide to run the launcher manually):
 location /challenge-4/ { proxy_pass http://127.0.0.1:8103/; }
 location /challenge-5/ { proxy_pass http://127.0.0.1:8104/; }
 ```
+
+Retained files
+--------------
+
+This minimal repository includes only the files needed for production hosting of the challenges when integrated into CTFd:
+
+- `plugins/ctfchallenges/` — CTFd plugin that registers the challenge routes (`load(app)` entrypoint).
+- `web-exploitation-challenges-*` — All challenge static folders and assets.
+- `README.md` — This installation and usage notes.
+
+To install the plugin into your production CTFd instance, copy the `plugins/ctfchallenges` folder into your CTFd `plugins` directory and restart CTFd.
+
